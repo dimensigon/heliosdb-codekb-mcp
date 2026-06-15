@@ -478,7 +478,11 @@ pub fn ingest(db: &EmbeddedDatabase, opts: IngestOptions) -> Result<IngestSummar
             eprintln!(
                 "ingest phase: code-graph bulk-write mode (bulk_load_mode={}, fk_validation={})",
                 bulk_enabled,
-                if fk_deferred { "deferred" } else { "engine-default" }
+                if fk_deferred {
+                    "deferred"
+                } else {
+                    "engine-default"
+                }
             );
         }
         let result = if opts.with_embeddings {
