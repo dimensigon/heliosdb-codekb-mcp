@@ -461,11 +461,37 @@ pub fn ingest(db: &EmbeddedDatabase, opts: IngestOptions) -> Result<IngestSummar
             parallelism: None,
             chunk_size: None,
         };
+        // Bulk-write the code-graph: defer FK validation to COMMIT and put the
+        // storage layer in bulk-load mode for the duration of `code_index`. The
+        // KB is regenerable from source, so per-row FK enforcement isn't paying
+        // for itself here — and on engines with the FK-validation regression
+        // (heliosdb-nano v3.28.0+, which includes the pinned 3.36.1) per-write FK
+        // validation falls back to a linear scan that dominates ingest wall time
+        // (~93 min / 700 files unwrapped). Wrapping `code_index` in these SETs
+        // cuts the code-graph phase ~14× on the pilot portfolio. Both SETs are
+        // best-effort: an engine that doesn't recognise them leaves them as
+        // no-ops, so this is safe across the supported 3.x range. RESET after so
+        // the bulk-mode relaxations don't leak into later phases.
+        let bulk_enabled = db.execute("SET bulk_load_mode = true").is_ok();
+        let fk_deferred = db.execute("SET fk_validation = deferred").is_ok();
+        if bulk_enabled || fk_deferred {
+            eprintln!(
+                "ingest phase: code-graph bulk-write mode (bulk_load_mode={}, fk_validation={})",
+                bulk_enabled,
+                if fk_deferred { "deferred" } else { "engine-default" }
+            );
+        }
         let result = if opts.with_embeddings {
             run_code_index_with_inproc_embedder(db, cio)
         } else {
             db.code_index(cio)
         };
+        if bulk_enabled {
+            let _ = db.execute("SET bulk_load_mode = false");
+        }
+        if fk_deferred {
+            let _ = db.execute("RESET fk_validation");
+        }
         // Note: the original code reached here as `match db.code_index(cio) {`.
         // Bridging to keep the rest of the body unchanged below.
         match result.map_err(anyhow::Error::from) {

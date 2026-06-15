@@ -157,24 +157,29 @@ fn init_then_ingest_produces_expected_row_counts() {
     // "Column 'body_vec' not found in schema" instead of just an
     // empty result).  Either outcome — error or zero rows — is
     // acceptable for "no embeddings".
-    match db.query(
-        "SELECT count(*) FROM _hdb_code_symbols WHERE body_vec IS NOT NULL",
-        &[],
-    ) {
-        Ok(rows) => {
-            let n = match rows.first().and_then(|r| r.values.first()) {
-                Some(Value::Int4(n)) => *n as i64,
-                Some(Value::Int8(n)) => *n,
-                _ => panic!("count returned non-int"),
-            };
-            assert_eq!(n, 0, "fast tier should leave body_vec NULL, found {n}");
-        }
+    // Probe the body_vec COLUMN directly — don't infer its presence from a
+    // `WHERE body_vec IS NOT NULL` count. heliosdb-nano 3.36.1's planner
+    // evaluates that predicate as always-true when the column is absent
+    // (returning every row) instead of erroring, so the count is not a
+    // reliable signal. `SELECT body_vec` *does* error when the column is
+    // missing, which is the authoritative check.
+    match db.query("SELECT body_vec FROM _hdb_code_symbols LIMIT 1", &[]) {
         Err(e) => {
+            // Column absent ⇒ no embedder ran. Correct for the fast tier.
             let msg = e.to_string();
             assert!(
                 msg.contains("body_vec") && msg.contains("not found"),
-                "unexpected error querying body_vec on fast tier: {msg}"
+                "unexpected error probing body_vec on fast tier: {msg}"
             );
+        }
+        Ok(_) => {
+            // Column exists ⇒ every value must still be NULL (no embedder
+            // populated it in the fast tier).
+            let n = count(
+                &db,
+                "SELECT count(*) FROM _hdb_code_symbols WHERE body_vec IS NOT NULL",
+            );
+            assert_eq!(n, 0, "fast tier should leave body_vec NULL, found {n}");
         }
     }
 }

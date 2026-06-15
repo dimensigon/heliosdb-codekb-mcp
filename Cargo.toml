@@ -1,6 +1,6 @@
 [package]
 name = "heliosdb-codekb-mcp"
-version = "0.2.5"
+version = "0.2.6"
 edition = "2021"
 description = "Local MCP server for code+docs knowledge bases, embedding HeliosDB-Nano as a library."
 license = "Apache-2.0"

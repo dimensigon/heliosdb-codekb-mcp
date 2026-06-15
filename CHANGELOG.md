@@ -4,6 +4,31 @@ Format roughly follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 versions track [Semantic Versioning](https://semver.org/spec/v2.0.0.html) on the
 plugin's CLI + MCP-tool contract, NOT on the embedded engine version.
 
+## [0.2.6] — 2026-06-15
+
+Ingest-performance patch for the pinned heliosdb-nano 3.36.1.
+
+### Changed
+
+- **Ingest: wrap `code_index` in bulk-load mode.** The code-graph phase now
+  runs under `SET bulk_load_mode = true` + `SET fk_validation = deferred`
+  (`RESET` after). This sidesteps the heliosdb-nano FK-validation regression
+  (v3.28.0+, which includes the pinned 3.36.1) where per-row FK checks fall
+  back to a linear scan that dominated ingest wall time (~93 min / 700 files).
+  Measured ~14× faster code-graph phase on the pilot portfolio. Both SETs are
+  best-effort (`.is_ok()`-guarded) and no-op on engines that don't recognise
+  them, so the change is safe across the supported 3.x range. The KB is
+  regenerable from source, so deferring FK validation to COMMIT is acceptable.
+
+### Fixed
+
+- **`tests/ingest_contract.rs` fast-tier `body_vec` check.** The assertion
+  inferred "embeddings ran" from a `WHERE body_vec IS NOT NULL` count, but
+  heliosdb-nano 3.36.1 evaluates that predicate as always-true when the column
+  is absent (returning every row) instead of erroring. The test now probes the
+  `body_vec` column directly (`SELECT body_vec …`, which authoritatively errors
+  when the column is missing), so a fast-tier ingest passes as intended.
+
 ## [0.2.5] — 2026-06-05
 
 Patch release to publish the HTTP-first adoption docs and installer
